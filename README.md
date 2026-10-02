@@ -1,10 +1,12 @@
 # FundTrace
 
-**面向基金研究场景的数据智能分析产品，将低频披露与日频收益数据转化为周频行业暴露线索。**
+**An explainable fund research analytics system that transforms low-frequency disclosures into higher-frequency industry exposure insights.**
+
+面向基金研究场景的数据智能产品：以公开披露和日频收益估计周频行业暴露，辅助持续研究。
 
 FundTrace 通过可解释的约束模型、可信度诊断和 Dashboard，帮助研究人员发现值得进一步核查的行业配置变化。
 
-[产品流程](#product-workflow) · [数据处理](#data-pipeline) · [模型方法](#modeling-methodology) · [产品界面](#product-interface) · [评价与局限](#evaluation-and-limitations)
+[产品流程](#product-workflow) · [数据处理](#data-pipeline) · [模型方法](#modeling-methodology) · [产品界面](#product-interface) · [评价框架](#evaluation-framework) · [局限](#limitations)
 
 > Public repository focuses on product architecture and implementation demonstration. Original research data are not included.
 >
@@ -22,13 +24,14 @@ FundTrace 将公开基金信息、净值与行业收益组织为一条分析流�
 
 ```mermaid
 flowchart TD
-    A[数据输入：净值、持股披露、行业配置、行业指数与映射]
+    U[User Input：基金代码与数据更新选项]
+    A[Data Collection：净值、持股、行业配置与预备市场底座]
     B[数据处理：清洗、行业映射、收益计算、日期对齐]
     C[模型估计：季度模拟组合 + 周频滚动约束回归]
     D[可信度评价：收益拟合质量 + 暴露合理性诊断]
     E[Dashboard：行业暴露、近期变化、历史趋势与风险提示]
     F[报告输出：Markdown 报告与结果 CSV]
-    A --> B --> C --> D --> E --> F
+    U --> A --> B --> C --> D --> E --> F
 ```
 
 用户输入基金代码，选择更新基金数据或使用已有本地数据。FastAPI 创建后台任务，调用 Python 分析入口；React 跟踪状态并展示结果。行业指数与股票行业映射底座需要预先准备，界面的“更新数据”不会自动补齐所有市场输入。
@@ -53,6 +56,10 @@ flowchart TD
 
 默认模型的市场输入是行业指数日线，不需要独立的宏观数据库。抓取脚本还可以保存基准权重，但默认分析入口没有使用该文件，不将其列为模型依赖。
 
+### 来源与文件格式
+
+净值与分红来自东方财富公开接口，名称解析自净值 JS；持股和行业配置通过 AkShare 的东方财富基金接口获取。行业指数与分类底座由 `fetch_data.py` 调用申万相关接口。CSV 保留日期、代码、占比或收盘价等字段，元数据使用 JSON。来源在这里指源码中的获取路径，不代表已重新抓取或取得再分发许可。逐类字段与接口见 [技术核验](docs/technical_audit.md#1-data-input-layer)。
+
 ### 从原始数据到模型矩阵
 
 1. **获取或读取数据。** [fetch_fund_manual.py](fetch_fund_manual.py) 从东方财富公开接口获取净值和分红，并通过 AkShare 获取持股及行业配置；[fetch_data.py](fetch_data.py) 提供行业指数与分类底座的获取入口。已有符合字段要求的本地 CSV 可直接由 `load_base` / `load_fund` 读取；没有独立的文件上传产品流程。外部接口可用性及数据使用许可需单独确认。
@@ -62,13 +69,26 @@ flowchart TD
 5. **构造行业收益。** 将行业指数长表透视为“日期 × 行业”的收盘价矩阵，再计算日涨跌幅。基金与行业收益取共同日期；保留有效记录超过一半的行业列，其余缺失值填零。这是现有实现的缺失处理规则，可能影响估计。
 6. **匹配披露时点。** 默认回归先将季度模拟组合日期后移 45 个周一至周五工作日，读取先验时再加 30 个自然日。该近似规则没有使用实际公告日期或完整交易日历，不能据此宣称严格消除了前视偏差。
 
-最终输入为基金日收益向量 `y`、同行业日收益矩阵 `X`，以及用于约束的滞后季度模拟组合。收益计算与对齐逻辑见 [regress.py](lib/regress.py)。
+### Feature Construction：X 与 y
+
+- **y（T 个观测）**：净值逐期涨跌幅，代表需要解释的基金日收益。
+- **X（T × K）**：同日期的 K 个行业指数日收益，每列对应一个行业。内置分类字典包含 31 个申万一级行业，但实际 K 取决于输入和筛选，不固定为 31 或 27。
+- **季度模拟组合**：默认不进入 X 的特征列，而是提供滞后的总暴露约束参照；基金名称也不参与建模。
+
+日期匹配以输入日期交集为准，没有额外补齐交易所日历。行业有效性筛选基于整段输入；计算涨跌幅时 `pct_change()` 的内部缺值行为依赖锁定的 Pandas 版本，随后才执行回归层的缺失填零。求解器将时间权重归一化、对 X/y 加权中心化，**不做 z-score 或 Min-Max 标准化**。收益与对齐实现见 [regress.py](lib/regress.py)，数值处理见 [solver.py](lib/solver.py)。
 
 ## Modeling Methodology
 
 **基金日收益 ≈ 行业日收益的加权组合 + 截距 + 未解释部分。**
 
 模型寻找一组行业系数，使行业收益组合尽量解释最近一段时间的基金收益。这些系数表示收益口径的隐含行业暴露，不是逐笔交易或真实持仓的读取结果。
+
+```math
+\min_{\beta,c}\sum_t\widetilde w_t(y_t-X_t\beta-c)^2+\alpha\sum_j\beta_j,
+\qquad \beta_j\ge0,\quad\sum_j\beta_j\le B.
+```
+
+第一项衡量收益解释误差；第二项控制系数收缩；约束要求行业暴露非负且总量不过高。因为系数非负，L1 惩罚等于系数之和。正则化可压缩冗余系数，但不保证找出真实配置，也不能彻底解决行业相关性。
 
 | 方法与默认参数 | 为什么需要 | 需要注意 |
 |---|---|---|
@@ -82,6 +102,31 @@ flowchart TD
 默认 `anchor_mult=None`，不启用逐行业锚定上限；季度模拟组合仍参与总暴露上限计算。求解器由 NumPy 实现，使用带约束投影的 FISTA。可选参数标定产生候选结果，不自动替换正式分析参数。
 
 参数来源：[run_analysis.py 的命令行默认值](run_analysis.py)、[rolling_positions](lib/regress.py)、[exp_decay_weights 与求解器](lib/solver.py)。FastAPI 默认调用分析入口而不覆写这些参数。更完整的方法与取舍见 [methodology.md](docs/methodology.md)。
+
+### Solver Implementation：系数如何计算
+
+每个周标签取不晚于该标签的最近日观测，重新求解一个窗口；没有使用上一窗口系数热启动。
+
+1. **准备与初始化。** 时间权重归一化为合计 1；按加权均值中心化 X 和 y，以便分离截距。行业系数从零向量开始。
+2. **确定步长。** 构造加权二次项矩阵 A 和向量 b，根据 A 的最大特征值确定梯度步长；特征值求解失败时使用 trace 兜底。
+3. **梯度更新与约束。** 使用 `2(Aβ-b)+alpha` 形式的梯度更新辅助点，再投影回非负且合计不超过 B 的可行区域。默认用排序阈值投影；可选单行业上限路径使用二分投影。
+4. **加速与停止。** FISTA 动量加速配合自适应重启。投影梯度残差不超过 `1e-10` 时标记收敛，否则继续，最多 `2000` 次；达到上限不等于已收敛。实际迭代次数由窗口数据与收敛情况决定。
+5. **恢复与诊断。** 恢复截距，得到 β、时间加权 R²、暴露合计及收敛状态。当前周频诊断 CSV 不保存求解器返回的迭代次数和投影残差。
+
+完整执行细节与证据见 [技术核验](docs/technical_audit.md#5-solver-implementation)。
+
+## Evaluation Framework
+
+**模型质量回答“收益解释得怎么样”；结果可信度回答“这组暴露是否值得参考”。**
+
+- **模型质量**参考最新窗口的 R²、求解收敛情况及历史报告等级。历史截图显示 R² 约为 0.831，反映窗口内收益拟合程度，不是持仓准确率。
+- **结果可信度**在基础等级上结合暴露合计差、行业结构偏离、近期变化与噪声等规则提示风险或限制等级，不改动模型系数。缺少参照数据时，会显示对应诊断不可用。规则实现见 [credibility.py](api/credibility.py)。
+- 示例即使拟合质量为 A，仍因明显偏离显示可信度 C。结构参照包含模拟组合，不能当作独立确认的完整持仓真值；等级也不是统计概率。
+
+
+代码中的基础等级为：收敛且 R²≥0.80 时为 A，≥0.60 为 B，≥0.35 为 C，否则为 D；未收敛或缺少 R² 也为 D，旧报告更低等级可限制该等级。可信度在此基础上降级或告警，例如暴露合计与披露配置相差达到 30 个百分点时等级最多为 C。阈值是产品规则，不是经概率校准的置信水平。
+
+因此，用户既能看到“是否拟合得好”，也能看到“为何仍需谨慎”，再决定进一步核查哪个行业。数据和真值不足时，产品不会因此获得更强的准确性结论。
 
 ## Product Interface
 
@@ -109,15 +154,8 @@ Dashboard 展示当前行业暴露、近四周变化、过去一年趋势、披�
 
 界面与源码运行方式见 [本地运行说明](docs/demo.md)。没有研究输入时可构建界面、浏览实现及运行不依赖研究数据的测试，不能 clone 后立即重算 161005。
 
-## Evaluation and Limitations
+## Limitations
 
-**模型质量回答“收益解释得怎么样”；结果可信度回答“这组暴露是否值得参考”。**
-
-- **模型质量**参考最新窗口的 R²、求解收敛情况及历史报告等级。示例 R² 约为 0.831，反映窗口内收益拟合程度，不是持仓准确率。
-- **结果可信度**在基础等级上结合暴露合计差、行业结构偏离、近期变化与噪声等规则提示风险或限制等级，不改动模型系数。缺少参照数据时，会显示对应诊断不可用。规则实现见 [credibility.py](api/credibility.py)。
-- 示例即使拟合质量为 A，仍因明显偏离显示可信度 C。结构参照包含模拟组合，不能当作独立确认的完整持仓真值；等级也不是统计概率。
-
-当前边界：
 
 - **不是实际持仓重建，也不是实时持仓查询。** 行业相关性、遗漏资产与基金个股选择都可能影响暴露解释。
 - **不是未来收益预测，也不是投资建议。** 产品帮助发现需要进一步研究的变化，不替代专业研究判断。
@@ -125,7 +163,7 @@ Dashboard 展示当前行业暴露、近四周变化、过去一年趋势、披�
 - 1.5σ 变化带是启发式提示，不是经过覆盖率验证的统计置信区间。旧下载报告的等级与 V1.4 Dashboard 可信度可能不同，应结合诊断阅读。
 - 单基金的流程验收不等于多基金泛化能力；完整持仓真值、严格样本外效果、用户研究效率与业务增益仍需验证。
 
-既有无研究数据版本验收记录：Python **66 passed、5 skipped**；前端 **25 passed、1 skipped**，构建成功。跳过项不计作通过，合成样本测试不证明真实市场准确性。本轮为文档整理，未重跑模型。详细记录见 [validation.md](docs/validation.md)。
+既有无研究数据版本验收记录：Python **66 passed、5 skipped**；前端 **25 passed、1 skipped**，构建成功。跳过项不计作通过，合成样本测试不证明真实市场准确性。详细记录见 [validation.md](docs/validation.md)。
 
 ## Technology Stack
 
@@ -152,4 +190,4 @@ fetch_data.py           数据底座获取
 fetch_fund_manual.py    单基金数据获取
 ```
 
-架构说明见 [architecture.md](docs/architecture.md)。源码沿用 [原开发仓库](https://github.com/Aequanimis/Fundtrace) 的 V1.4 产品实现；研究数据不随本仓库分发，公开范围见 [PUBLIC_SCOPE.md](PUBLIC_SCOPE.md)。
+架构说明见 [architecture.md](docs/architecture.md)，完整六层 Pipeline、数字核验表与证据边界见 [technical_audit.md](docs/technical_audit.md)。源码沿用 [原开发仓库](https://github.com/Aequanimis/Fundtrace) 的 V1.4 产品实现；研究数据不随本仓库分发，公开范围见 [PUBLIC_SCOPE.md](PUBLIC_SCOPE.md)。
