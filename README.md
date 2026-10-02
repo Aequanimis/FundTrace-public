@@ -6,11 +6,17 @@
 
 **Data Product + Explainable Quantitative Intelligence** · React · FastAPI · Python
 
-> Public repository focuses on product architecture and implementation demonstration. Original research data are not included.
->
-> 本仓库是独立的面试作品展示版本。保留产品源码、方法和真实运行截图，不附基金缓存、行情数据库或原开发历史。截图来自 V1.4 的本地历史数据验收，不是在线服务或合成结果。
+**张尚俊｜主导产品设计**：从基金研究的信息空窗出发，定义用户流程、数据与模型协作方式，以及结果可信度的呈现与评价。
 
-[产品架构](docs/architecture.md) · [模型与评价](docs/methodology.md) · [演示指南](docs/demo.md) · [面试讲稿](docs/interview.md)
+[我的贡献](#my-contribution) · [产品流程](#product) · [真实 Demo](#demo) · [面试重点](#interview-focus)
+
+> Public repository focuses on product architecture and implementation demonstration. Original research data are not included.
+
+**真实产品一览：拟合质量 A，结果可信度 C。** 将两种判断分开展示，帮助用户识别需要进一步核查的结果。
+
+<img src="assets/model_diagnostics.png" alt="161005 真实诊断页面：模型质量 A、结果可信度 C，保留风险提示与日期" width="760">
+
+161005 历史运行截图，周频标签 2026-08-07；不是在线服务。完整 Dashboard 及数据时点说明见 [Demo](#demo)。
 
 ## Why
 
@@ -35,8 +41,6 @@ FundTrace 将问题定义为：**有哪些行业暴露变化值得进一步验�
 | 判断结果能否参考 | 将模型拟合质量与结果可信度分开展示 |
 | 带入研究工作 | 下载报告、周频结果和诊断 CSV |
 
-实习项目中主导的产品设计重点，是将数据准备、可解释估计和结果核查组织成一条可使用的流程。个人角色按项目负责人陈述；不据此宣称独立完成所有代码或已经机构上线。
-
 ## Architecture
 
 | 层级 | 实现与职责 |
@@ -48,6 +52,20 @@ FundTrace 将问题定义为：**有哪些行业暴露变化值得进一步验�
 | Presentation | 将结果文件转成 Dashboard 数据，分别解释拟合和可信度 |
 
 本地生产模式由 FastAPI 提供构建后的 React 页面。原实现还保留 Streamlit 入口；本展示以 React 产品界面为主。[详细架构](docs/architecture.md)
+
+## My Contribution
+
+我在实习期间主导 FundTrace 的产品设计，重点是将研究问题转化为可使用、可解释、可核查的数据智能产品。
+
+| 产品职责 | 我的贡献与设计判断 |
+|---|---|
+| **业务问题发现 · User Problem** | 识别低频持仓披露与持续基金研究之间的信息空窗，将用户问题聚焦为“哪些行业暴露变化值得进一步核查”。 |
+| **产品需求定义 · Product Thinking** | 定义基金输入、行业暴露分析、可信度诊断和报告输出的完整流程，让用户既能看到变化，也能判断结果是否值得参考。 |
+| **产品架构设计 · Solution Design** | 统筹数据处理、模型计算与用户交互的职责和衔接：将分散输入组织成统一分析流程，再把模型输出转成图表、诊断与可下载材料。 |
+| **模型与评价设计 · Evaluation** | 围绕研究场景明确滚动窗口、时间衰减与非负约束的取舍；设计模型质量与结果可信度分离的评价机制，避免用户把收益拟合误读为持仓准确性。 |
+| **产品化与迭代 · Iteration** | 推动研究模型落地为 React + FastAPI 交互工具；在 V1.4 中将结果偏离与风险提示纳入展示，形成从“算出结果”到“解释如何使用结果”的迭代。 |
+
+当前证据包括真实 Dashboard、离线流程验收和实现测试；研究效率提升、用户采纳与投资收益尚未经过业务实验验证。这里描述的是主导产品设计的职责，不代表独立完成全部工程实现。
 
 ## Methodology
 
@@ -65,9 +83,7 @@ FundTrace 将问题定义为：**有哪些行业暴露变化值得进一步验�
 
 **一个值得展示的产品判断：模型质量 A，结果可信度 C。**
 
-![真实模型诊断：拟合质量与结果可信度分离](assets/model_diagnostics.png)
-
-最新窗口 R² 为 0.831，但与披露结构存在明显偏离，因此提示谨慎参考。R² 不是持仓准确率，C 也不是统计概率。
+首页诊断截图中，最新窗口 R² 为 0.831，但与披露结构存在明显偏离，因此提示谨慎参考。R² 不是持仓准确率，C 也不是统计概率。[查看诊断原图](assets/model_diagnostics.png)
 
 <details>
 <summary>查看完整 Dashboard：暴露、变化、趋势、诊断和下载</summary>
@@ -89,7 +105,7 @@ FundTrace 将问题定义为：**有哪些行业暴露变化值得进一步验�
 
 ## Product Thinking
 
-模型不是最终目的。它将公开数据转成研究员可以理解、筛选和验证的线索。
+模型的目标不是预测未来收益，而是将公开数据转成研究员可以理解、筛选和进一步验证的研究线索。产品价值在于支持研究任务，并帮助用户理解输出的不确定性。
 
 1. **先定义任务，再选技术。** 关注“下一步查什么”，避免把拟合数字当作产品价值。
 2. **把不确定性纳入产品。** 结果页解释拟合、偏离和适用边界，而不只输出一个仓位百分比。
@@ -98,6 +114,24 @@ FundTrace 将问题定义为：**有哪些行业暴露变化值得进一步验�
 下一步优先完善完整持仓真值、真实公告日和多基金样本外验证，再开展研究员任务实验。目前没有实时持仓还原、收益提升、替代商业终端或正式机构部署的证据。
 
 **不包含 LLM、RAG 或 Agent。** 数据智能体现在自动化分析、可解释统计建模和模型评价；不虚构生成式 AI 能力。
+
+## Interview Focus
+
+**Why this project matters:**
+
+- Converts fragmented public data into actionable research insights — actionable means identifying what to investigate next, not generating investment instructions.
+- Combines quantitative modeling with user-oriented product design.
+- Demonstrates responsible AI/product evaluation through uncertainty disclosure.
+
+**FundTrace does not claim:**
+
+- Real-time holdings reconstruction.
+- Guaranteed prediction accuracy.
+- Replacement of professional research judgment.
+
+面试建议围绕“发现用户问题 → 定义研究流程 → 选择技术方案 → 设计评价与风险提示 → 根据结果迭代”展开，以真实页面和设计取舍说明我的 AI Product Manager 能力。
+
+[1 分钟 / 3 分钟讲稿与 28 个追问](docs/interview.md) · [产品架构](docs/architecture.md) · [模型与评价](docs/methodology.md) · [演示指南](docs/demo.md)
 
 ---
 
