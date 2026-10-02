@@ -1,149 +1,155 @@
 # FundTrace
 
-**Explainable weekly fund industry exposure analytics product.**
+**面向基金研究场景的数据智能分析产品，将低频披露与日频收益数据转化为周频行业暴露线索。**
 
-面向基金研究场景的数据智能分析产品：将低频披露与日频净值、行业收益组织成周频暴露线索，帮助研究员决定下一步核查什么。
+FundTrace 通过可解释的约束模型、可信度诊断和 Dashboard，帮助研究人员发现值得进一步核查的行业配置变化。
 
-**Data Product + Explainable Quantitative Intelligence** · React · FastAPI · Python
-
-**张尚俊｜主导产品设计**：从基金研究的信息空窗出发，定义用户流程、数据与模型协作方式，以及结果可信度的呈现与评价。
-
-[我的贡献](#my-contribution) · [产品流程](#product) · [真实 Demo](#demo) · [面试重点](#interview-focus)
+[产品流程](#product-workflow) · [数据处理](#data-pipeline) · [模型方法](#modeling-methodology) · [产品界面](#product-interface) · [评价与局限](#evaluation-and-limitations)
 
 > Public repository focuses on product architecture and implementation demonstration. Original research data are not included.
+>
+> 本仓库提供源码、方法说明和真实历史运行截图，不包含原始研究数据，也不提供在线分析服务。完整分析需要自行准备有权使用的数据。
 
-**真实产品一览：拟合质量 A，结果可信度 C。** 将两种判断分开展示，帮助用户识别需要进一步核查的结果。
+## Overview
 
-<img src="assets/model_diagnostics.png" alt="161005 真实诊断页面：模型质量 A、结果可信度 C，保留风险提示与日期" width="760">
+基金净值持续变化，持仓披露却是低频快照。在两次披露之间，研究人员难以直接观察行业配置的变化。分散的净值、持股和行业信息需要经过统一整理，才能进入持续跟踪流程。
 
-161005 历史运行截图，周频标签 2026-08-07；不是在线服务。完整 Dashboard 及数据时点说明见 [Demo](#demo)。
+FundTrace 将公开基金信息、净值与行业收益组织为一条分析流程：以披露构建季度模拟行业组合，再用日收益解释基金表现，形成周频隐含行业暴露。更高的输出频率来自收益数据与模型估计，并不意味着获得了新的真实持仓披露。
 
-## Why
+目标场景包括基金定期复盘、行业暴露变化观察和披露后的交叉核查。产品输出是研究线索，不是未来收益预测或自动投资决策。
 
-**业务问题：持仓披露是低频快照，基金研究却需要持续观察。**
+## Product Workflow
 
-研究员在两次披露之间难以直接看到行业配置变化。人工整理披露、分类与净值曲线可以提供信息，但不容易形成重复使用的跟踪流程。
+```mermaid
+flowchart TD
+    A[数据输入：净值、持股披露、行业配置、行业指数与映射]
+    B[数据处理：清洗、行业映射、收益计算、日期对齐]
+    C[模型估计：季度模拟组合 + 周频滚动约束回归]
+    D[可信度评价：收益拟合质量 + 暴露合理性诊断]
+    E[Dashboard：行业暴露、近期变化、历史趋势与风险提示]
+    F[报告输出：Markdown 报告与结果 CSV]
+    A --> B --> C --> D --> E --> F
+```
 
-FundTrace 将问题定义为：**有哪些行业暴露变化值得进一步验证？** 产品目标是补充研究线索，而非声称掌握实时真实持仓。
+用户输入基金代码，选择更新基金数据或使用已有本地数据。FastAPI 创建后台任务，调用 Python 分析入口；React 跟踪状态并展示结果。行业指数与股票行业映射底座需要预先准备，界面的“更新数据”不会自动补齐所有市场输入。
 
-目标用户：基金研究员、基金筛选与组合研究人员。典型场景：定期复盘一只主动权益基金，识别行业偏离，并结合后续披露复核。
+对应实现：[任务编排](api/server.py)、[分析入口](run_analysis.py)、[结果组织](api/presentation.py)、[Dashboard](frontend/src/components/ResultsDashboard.jsx)。
 
-## Product
+## Data Pipeline
 
-基金输入 → 数据处理 → 模型计算 → 行业暴露曲线 → 可信度诊断 → Dashboard 展示 → 报告输出。
+### 数据输入与作用
 
-![产品数据流程](assets/workflow.png)
+以下文件是完整分析所需的本地输入格式，不随 Public 仓库分发。
 
-| 用户任务 | 产品设计 |
-|---|---|
-| 开始一次研究 | 输入基金代码，选择更新数据或使用本地数据 |
-| 理解发生了什么 | 当前暴露、近四周变化、历史趋势及披露基座对比 |
-| 判断结果能否参考 | 将模型拟合质量与结果可信度分开展示 |
-| 带入研究工作 | 下载报告、周频结果和诊断 CSV |
+| 数据 | 代码读取的位置 | 作用与必要性 |
+|---|---|---|
+| 基金基本信息 | `funds/<code>/metadata.json` 等本地元数据 | 显示基金名称与身份；不参与收益回归。缺失名称时界面使用代码兜底。 |
+| 基金净值 | `funds/<code>/nav.csv` | 必需；构造基金日收益，作为模型要解释的目标。 |
+| 基金持股披露 | `funds/<code>/holdings.csv` | 必需；包含股票代码、报告期和占比，用于构建季度模拟行业组合。 |
+| 披露行业配置 | `funds/<code>/industry_alloc.csv` | 可选；帮助补全季度行业结构，并为暴露合计诊断提供披露参照。缺失会削弱比较能力。 |
+| 行业指数日线 | `base/sw_industry_index.csv` | 必需；默认路径用申万一级行业指数收盘价计算行业日收益。 |
+| 股票行业映射 | `base/stock_industry_map.csv` | 必需；将披露股票归入申万一级行业。 |
+| 个股行情 | `base/stock_klines.csv` | 仅可选 `stock_level` 路径需要；默认产品流程不依赖该文件，本次历史产品验收未验证该路径。 |
 
-## Architecture
+默认模型的市场输入是行业指数日线，不需要独立的宏观数据库。抓取脚本还可以保存基准权重，但默认分析入口没有使用该文件，不将其列为模型依赖。
 
-| 层级 | 实现与职责 |
-|---|---|
-| Frontend | React + Recharts：输入、进度、图表、诊断与下载 |
-| Backend | FastAPI，源码目录 `api/`：本地任务、结果组织和文件接口 |
-| Data Pipeline | Python + Pandas：净值收益、字段清洗、行业映射与时间对齐 |
-| Model Layer | NumPy：季度模拟组合、滚动约束优化及诊断 |
-| Presentation | 将结果文件转成 Dashboard 数据，分别解释拟合和可信度 |
+### 从原始数据到模型矩阵
 
-本地生产模式由 FastAPI 提供构建后的 React 页面。原实现还保留 Streamlit 入口；本展示以 React 产品界面为主。[详细架构](docs/architecture.md)
+1. **获取或读取数据。** [fetch_fund_manual.py](fetch_fund_manual.py) 从东方财富公开接口获取净值和分红，并通过 AkShare 获取持股及行业配置；[fetch_data.py](fetch_data.py) 提供行业指数与分类底座的获取入口。已有符合字段要求的本地 CSV 可直接由 `load_base` / `load_fund` 读取；没有独立的文件上传产品流程。外部接口可用性及数据使用许可需单独确认。
+2. **清洗字段。** 统一六位股票代码、百分比和报告期；删除持股中的无效字段、非正占比及报告期内重复股票。净值抓取路径按日期排序去重，行业指数转换日期并剔除缺失日期或收盘价的记录。实现见 [simulate.py](lib/simulate.py) 与抓取脚本。
+3. **构建季度模拟行业组合。** 将持股映射到行业，结合行业配置与历史结构补全未披露部分。分类转换和非重仓部分依赖假设；模拟组合不是完整持仓真值。
+4. **计算基金收益。** 优先使用 `nav_adj` 复权净值，其抓取流程尝试把分红加回日收益后累乘；其次使用 `nav_unit`。代码仍保留 `nav_cum` 的警告兜底，不能将累计净值收益视为可靠的复权收益替代。分红获取失败时，复权构建会退化为单位净值收益。
+5. **构造行业收益。** 将行业指数长表透视为“日期 × 行业”的收盘价矩阵，再计算日涨跌幅。基金与行业收益取共同日期；保留有效记录超过一半的行业列，其余缺失值填零。这是现有实现的缺失处理规则，可能影响估计。
+6. **匹配披露时点。** 默认回归先将季度模拟组合日期后移 45 个周一至周五工作日，读取先验时再加 30 个自然日。该近似规则没有使用实际公告日期或完整交易日历，不能据此宣称严格消除了前视偏差。
 
-## My Contribution
+最终输入为基金日收益向量 `y`、同行业日收益矩阵 `X`，以及用于约束的滞后季度模拟组合。收益计算与对齐逻辑见 [regress.py](lib/regress.py)。
 
-我在实习期间主导 FundTrace 的产品设计，重点是将研究问题转化为可使用、可解释、可核查的数据智能产品。
+## Modeling Methodology
 
-| 产品职责 | 我的贡献与设计判断 |
-|---|---|
-| **业务问题发现 · User Problem** | 识别低频持仓披露与持续基金研究之间的信息空窗，将用户问题聚焦为“哪些行业暴露变化值得进一步核查”。 |
-| **产品需求定义 · Product Thinking** | 定义基金输入、行业暴露分析、可信度诊断和报告输出的完整流程，让用户既能看到变化，也能判断结果是否值得参考。 |
-| **产品架构设计 · Solution Design** | 统筹数据处理、模型计算与用户交互的职责和衔接：将分散输入组织成统一分析流程，再把模型输出转成图表、诊断与可下载材料。 |
-| **模型与评价设计 · Evaluation** | 围绕研究场景明确滚动窗口、时间衰减与非负约束的取舍；设计模型质量与结果可信度分离的评价机制，避免用户把收益拟合误读为持仓准确性。 |
-| **产品化与迭代 · Iteration** | 推动研究模型落地为 React + FastAPI 交互工具；在 V1.4 中将结果偏离与风险提示纳入展示，形成从“算出结果”到“解释如何使用结果”的迭代。 |
+**基金日收益 ≈ 行业日收益的加权组合 + 截距 + 未解释部分。**
 
-当前证据包括真实 Dashboard、离线流程验收和实现测试；研究效率提升、用户采纳与投资收益尚未经过业务实验验证。这里描述的是主导产品设计的职责，不代表独立完成全部工程实现。
+模型寻找一组行业系数，使行业收益组合尽量解释最近一段时间的基金收益。这些系数表示收益口径的隐含行业暴露，不是逐笔交易或真实持仓的读取结果。
 
-## Methodology
+| 方法与默认参数 | 为什么需要 | 需要注意 |
+|---|---|---|
+| Rolling window：`window=120` | 每次使用最近最多 120 个交易日，允许估计随近期表现变化。 | 短窗口响应更快但噪声更大；窗口至少需要 60 个有效观测，早期不一定满 120 日。 |
+| Exponential decay：指数时间衰减 | 较新的样本获得更高权重，减少很久以前的表现对当前估计的影响。 | 对近期变化更敏感，也可能放大短期噪声。 |
+| Half-life：`half_life=40` | 40 个交易日前的样本权重约为最新样本的一半，80 日前约为四分之一；权重为 `0.5^(age / 40)`。 | 半衰期控制信息“变旧”的速度；不是预测期限。参数小于等于 0 时使用等权。 |
+| Non-negative Lasso：`alpha=1e-6` | 限制行业系数非负，适配多头权益解释；L1 惩罚压缩不必要的系数。 | 不能消除相关行业之间的替代，也不适用于所有对冲策略。 |
+| 总暴露上限：`equity_cap="auto"` | 限制系数合计，避免出现难以解释的总暴露。 | 当前上限为滞后模拟组合合计的 1.05 倍、最高 0.98；无可用先验时为 0.95。 |
+| 周频输出：`freq="W-FRI"` | 按周组织结果，便于观察趋势与近期变化。 | 周五是结果标签；实际输入可能只更新到当周更早日期。 |
 
-- **模拟行业组合**：以披露重仓股和行业配置为骨架，利用历史结构补全季度行业分布；未披露部分仍是估计。
-- **滚动窗口**：默认最近 120 个交易日，避免长期平均完全掩盖近期配置变化。
-- **时间衰减**：默认 40 个交易日半衰期，使近期数据影响更大，也需要控制噪声。
-- **非负 Lasso**：用行业收益解释基金收益；结合总暴露上限，形成多头权益场景下较容易理解的暴露估计。NumPy 自实现求解器，没有 sklearn 依赖。
-- **可信度评价**：收益拟合较好不代表行业推断可靠。V1.4 结合暴露总量差、结构偏离等规则限制结果等级。
+默认 `anchor_mult=None`，不启用逐行业锚定上限；季度模拟组合仍参与总暴露上限计算。求解器由 NumPy 实现，使用带约束投影的 FISTA。可选参数标定产生候选结果，不自动替换正式分析参数。
 
-稳定模型使用 `v4-a2.1-stable` 的 legacy 上限，未合入 B2 研究分支的上限实验。模型公式、真值与时点局限见 [methodology.md](docs/methodology.md)。
+参数来源：[run_analysis.py 的命令行默认值](run_analysis.py)、[rolling_positions](lib/regress.py)、[exp_decay_weights 与求解器](lib/solver.py)。FastAPI 默认调用分析入口而不覆写这些参数。更完整的方法与取舍见 [methodology.md](docs/methodology.md)。
 
-## Demo
+## Product Interface
 
-以下均为 **161005 真实本地运行截图**。周频结果标签截至 2026-08-07，行业指数输入截至 2026-08-05；不是当前市场数据。
+Dashboard 展示当前行业暴露、近四周变化、过去一年趋势、披露基座对比、模型状态和下载入口。以下图片来自 **161005 的真实历史运行**，周频标签截至 **2026-08-07**，行业指数输入截至 **2026-08-05**，不代表当前市场数据。
 
-**一个值得展示的产品判断：模型质量 A，结果可信度 C。**
+**诊断示例：模型质量 A，结果可信度 C。**
 
-首页诊断截图中，最新窗口 R² 为 0.831，但与披露结构存在明显偏离，因此提示谨慎参考。R² 不是持仓准确率，C 也不是统计概率。[查看诊断原图](assets/model_diagnostics.png)
+<img src="assets/model_diagnostics.png" alt="161005 真实 Dashboard 诊断区域：拟合质量 A、结果可信度 C，含日期与风险提示" width="760">
 
 <details>
-<summary>查看完整 Dashboard：暴露、变化、趋势、诊断和下载</summary>
+<summary>查看完整 Dashboard：行业暴露、近期变化、趋势及诊断</summary>
 
 ![真实完整 Dashboard](assets/dashboard.png)
 
 </details>
 
 <details>
-<summary>查看真实历史结果曲线</summary>
+<summary>查看历史行业暴露结果曲线</summary>
 
-![历史周频隐含行业暴露](assets/result_example.png)
+![真实历史行业暴露曲线](assets/result_example.png)
 
 </details>
 
-原开发版本验收：Python **71 passed**；前端 **25 passed + 1 skipped**；161005 离线分析、Dashboard 和下载实际成功；1,044 周×27 行业与稳定基线数值一致。数值一致表示复现稳定，不代表持仓真值准确。[验收与公开版测试说明](docs/validation.md)
+分析入口生成 `weekly_positions.csv`、`diagnostics.csv`、`sim_portfolio.csv`、`report.md` 和结果图 `positions.png`。当前界面下载接口提供报告、周频结果和诊断 CSV；Public 仓库仅保留展示图片，不附这些研究结果数据。
 
-**如何查看：**直接阅读以上截图及文档即可，无须下载研究数据。可构建前端并启动本地界面查看实现；完整基金分析需要用户自行准备有使用权限的数据，本仓库不承诺 clone 后直接重算 161005。[源码运行说明](docs/demo.md)
+界面与源码运行方式见 [本地运行说明](docs/demo.md)。没有研究输入时可构建界面、浏览实现及运行不依赖研究数据的测试，不能 clone 后立即重算 161005。
 
-## Product Thinking
+## Evaluation and Limitations
 
-模型的目标不是预测未来收益，而是将公开数据转成研究员可以理解、筛选和进一步验证的研究线索。产品价值在于支持研究任务，并帮助用户理解输出的不确定性。
+**模型质量回答“收益解释得怎么样”；结果可信度回答“这组暴露是否值得参考”。**
 
-1. **先定义任务，再选技术。** 关注“下一步查什么”，避免把拟合数字当作产品价值。
-2. **把不确定性纳入产品。** 结果页解释拟合、偏离和适用边界，而不只输出一个仓位百分比。
-3. **区分工程可用与业务有效。** 当前已经验证流程；研究任务耗时、有效线索率、误报和用户采纳仍需实验。
+- **模型质量**参考最新窗口的 R²、求解收敛情况及历史报告等级。示例 R² 约为 0.831，反映窗口内收益拟合程度，不是持仓准确率。
+- **结果可信度**在基础等级上结合暴露合计差、行业结构偏离、近期变化与噪声等规则提示风险或限制等级，不改动模型系数。缺少参照数据时，会显示对应诊断不可用。规则实现见 [credibility.py](api/credibility.py)。
+- 示例即使拟合质量为 A，仍因明显偏离显示可信度 C。结构参照包含模拟组合，不能当作独立确认的完整持仓真值；等级也不是统计概率。
 
-下一步优先完善完整持仓真值、真实公告日和多基金样本外验证，再开展研究员任务实验。目前没有实时持仓还原、收益提升、替代商业终端或正式机构部署的证据。
+当前边界：
 
-**不包含 LLM、RAG 或 Agent。** 数据智能体现在自动化分析、可解释统计建模和模型评价；不虚构生成式 AI 能力。
+- **不是实际持仓重建，也不是实时持仓查询。** 行业相关性、遗漏资产与基金个股选择都可能影响暴露解释。
+- **不是未来收益预测，也不是投资建议。** 产品帮助发现需要进一步研究的变化，不替代专业研究判断。
+- 数据清洗、静态行业映射、缺失填零及近似披露时点均会引入误差；`FULL` 模式的持股数量判断也不能证明数据完整。
+- 1.5σ 变化带是启发式提示，不是经过覆盖率验证的统计置信区间。旧下载报告的等级与 V1.4 Dashboard 可信度可能不同，应结合诊断阅读。
+- 单基金的流程验收不等于多基金泛化能力；完整持仓真值、严格样本外效果、用户研究效率与业务增益仍需验证。
 
-## Interview Focus
+既有无研究数据版本验收记录：Python **66 passed、5 skipped**；前端 **25 passed、1 skipped**，构建成功。跳过项不计作通过，合成样本测试不证明真实市场准确性。本轮为文档整理，未重跑模型。详细记录见 [validation.md](docs/validation.md)。
 
-**Why this project matters:**
+## Technology Stack
 
-- Converts fragmented public data into actionable research insights — actionable means identifying what to investigate next, not generating investment instructions.
-- Combines quantitative modeling with user-oriented product design.
-- Demonstrates responsible AI/product evaluation through uncertainty disclosure.
+| 技术 | 职责 |
+|---|---|
+| Python | 数据获取、分析编排、报告输出与测试 |
+| FastAPI | 本地分析任务、结果接口、文件下载与静态页面服务 |
+| React + Recharts | 用户交互、任务状态与结果图表 |
+| Pandas | 表格清洗、日期对齐、收益计算与文件读写 |
+| NumPy | 特征矩阵、约束优化与数值计算 |
 
-**FundTrace does not claim:**
-
-- Real-time holdings reconstruction.
-- Guaranteed prediction accuracy.
-- Replacement of professional research judgment.
-
-面试建议围绕“发现用户问题 → 定义研究流程 → 选择技术方案 → 设计评价与风险提示 → 根据结果迭代”展开，以真实页面和设计取舍说明我的 AI Product Manager 能力。
-
-[1 分钟 / 3 分钟讲稿与 28 个追问](docs/interview.md) · [产品架构](docs/architecture.md) · [模型与评价](docs/methodology.md) · [演示指南](docs/demo.md)
-
----
+## Project Structure
 
 ```text
-api/         FastAPI backend（保留原模块路径）
-frontend/    React 产品源码与测试
-lib/         模型与数据处理
-tests/       Python 测试与合成测试生成器，无研究数据基线
-tools/       本地启动与验证辅助
-docs/        架构、方法、演示、评价、面试材料
-assets/      真实截图与工作流说明图
+api/                    FastAPI 后端、结果组织与可信度评价
+frontend/               React 界面与前端测试
+lib/                    季度模拟组合、回归、求解器与标定逻辑
+tools/                  启动、环境检查与回归验证工具
+tests/                  Python 测试与合成样本工具
+docs/                   架构、方法、运行及验证文档
+assets/                 真实截图、结果图与流程说明图
+run_analysis.py         完整分析入口
+fetch_data.py           数据底座获取
+fetch_fund_manual.py    单基金数据获取
 ```
 
-源码来自原开发仓库 [Aequanimis/Fundtrace](https://github.com/Aequanimis/Fundtrace) 的 V1.4 产品版本，公开仓库采用全新独立历史。公开范围见 [PUBLIC_SCOPE.md](PUBLIC_SCOPE.md)。
-
+架构说明见 [architecture.md](docs/architecture.md)。源码沿用 [原开发仓库](https://github.com/Aequanimis/Fundtrace) 的 V1.4 产品实现；研究数据不随本仓库分发，公开范围见 [PUBLIC_SCOPE.md](PUBLIC_SCOPE.md)。

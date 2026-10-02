@@ -6,7 +6,7 @@ This repository is a standalone product portfolio snapshot, not a complete resea
 
 - FastAPI backend (api), React frontend source, Python model library and orchestration.
 - Python/frontend tests, including synthetic test fixtures defined in code.
-- Architecture, methodology, product narrative, interview scripts and validation boundaries.
+- Architecture, methodology, product workflow and validation boundaries.
 - Four selected images: actual historical Dashboard, actual model diagnostics, actual generated result plot, and an explanatory workflow diagram.
 
 ## Excluded
